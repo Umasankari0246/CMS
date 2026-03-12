@@ -27,7 +27,6 @@ function LogoutIcon() {
 }
 
 export default function DashboardPage() {
-
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -58,7 +57,7 @@ export default function DashboardPage() {
   };
 
   /* CURRENT PAGE */
-  const currentPath = window.location.pathname;
+  const currentPath = window.location.pathname; // ignore query params
 
   /* NOTIFICATIONS */
   const unreadCount = Number(localStorage.getItem("cmsUnreadCount")) || 0;
@@ -76,45 +75,30 @@ export default function DashboardPage() {
         <aside className={`sidebar${sidebarOpen ? " open" : ""}`}>
 
           <div className="sidebar-logo">
-
             <div className="logo-mark">
               <GraduationIcon />
             </div>
-
             <div>
               <div className="logo-title">MIT Connect</div>
-              <div className="logo-sub">
-                MIT Connect - {data.label} Portal
-              </div>
+              <div className="logo-sub">MIT Connect Portal</div>
             </div>
-
           </div>
 
           {/* NAVIGATION */}
           <nav className="sidebar-nav">
-
             {menuGroups.map((group) => (
-
               <div key={group.title}>
-
-                <div className="nav-section-label">
-                  {group.title}
-                </div>
-
+                <div className="nav-section-label">{group.title}</div>
                 <ul>
-
                   {group.items.map((item) => (
-
                     <li key={item}>
-
                       <a
                         href="#"
-                        className={currentPath === routes[item] ? "active" : ""}
+                        className={currentPath.startsWith(routes[item]) ? "active" : ""}
                         onClick={(event) => {
                           event.preventDefault();
-
                           if (routes[item]) {
-                            navigate(routes[item]);
+                            navigate(routes[item]); // navigate without query params
                           }
                         }}
                         style={{
@@ -123,9 +107,7 @@ export default function DashboardPage() {
                           alignItems: "center"
                         }}
                       >
-
                         {item}
-
                         {item === "Notifications" && unreadCount > 0 && (
                           <span
                             style={{
@@ -140,24 +122,16 @@ export default function DashboardPage() {
                             {unreadCount}
                           </span>
                         )}
-
                       </a>
-
                     </li>
-
                   ))}
-
                 </ul>
-
               </div>
-
             ))}
-
           </nav>
 
           {/* LOGOUT */}
           <div className="sidebar-footer">
-
             <a
               href="#"
               onClick={(event) => {
@@ -165,12 +139,9 @@ export default function DashboardPage() {
                 handleLogout();
               }}
             >
-
               <LogoutIcon />
               Logout
-
             </a>
-
           </div>
 
         </aside>
@@ -179,93 +150,49 @@ export default function DashboardPage() {
         <main className="main-content">
 
           <div className="topbar">
-
             <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
-
               <button
                 className="mobile-menu-btn"
                 onClick={() => setSidebarOpen(true)}
               >
                 <MenuIcon />
               </button>
-
               <div>
-                <h2>{data.label} Dashboard</h2>
+                <h2>Dashboard</h2>
                 <p>{data.subtitle}</p>
               </div>
-
             </div>
-
-            <div>
-              <span className="badge badge-info">
-                {data.label}
-              </span>
-            </div>
-
+            <div></div>
           </div>
 
           {/* PROFILE */}
           <div className="profile-header">
-
             <div className="profile-left">
-
-              <div className="avatar-initials">
-                {data.label.slice(0, 2).toUpperCase()}
-              </div>
-
+              <div className="avatar-initials">{data.label.slice(0, 2).toUpperCase()}</div>
               <div>
-
-                <div className="student-name">
-                  {data.name}
-                </div>
-
+                <div className="student-name">{data.name}</div>
                 <div className="profile-meta">
                   <span>ID: {userId}</span>
                   <span>Team: {data.team}</span>
                   <span>Focus: {data.focus}</span>
                 </div>
-
               </div>
-
             </div>
-
             <div>
-
-              <button className="btn-primary-sm">
-                {data.primaryAction}
-              </button>
-
-              <button className="btn-secondary-sm">
-                {data.secondaryAction}
-              </button>
-
+              <button className="btn-primary-sm">{data.primaryAction}</button>
+              <button className="btn-secondary-sm">{data.secondaryAction}</button>
             </div>
-
           </div>
 
           {/* STATS */}
           <div className="stats-grid">
-
             {data.stats.map((entry) => (
-
               <div key={entry.label} className="stat-card">
-
-                <div className="stat-value">
-                  {entry.value}
-                </div>
-
-                <div className="stat-label">
-                  {entry.label}
-                </div>
-
-                <div className="stat-sub">
-                  {entry.sub}
-                </div>
-
+                <div className="stat-value">{entry.value}</div>
+                <div className="stat-label">{entry.label}</div>
+                <div className="stat-sub">{entry.sub}</div>
               </div>
-
             ))}
-
           </div>
 
         </main>

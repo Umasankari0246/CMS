@@ -245,6 +245,16 @@ const SEMESTER_OPTS = ['Semester 4 (Current)','Semester 3','Semester 2','Semeste
 const DEPT_OPTS     = ['All Departments','Computer Science','Physics','Mathematics','Electronics','Mechanical'];
 const COURSE_OPTS   = ['All Courses','DBMS','Data Structures','Physics','Mathematics','CS Elective'];
 
+// Map dropdown label → data key used in chart data
+const DEPT_CODE = {
+  'All Departments':  null,
+  'Computer Science': 'CS',
+  'Physics':          'Phys',
+  'Mathematics':      'Math',
+  'Electronics':      'ECE',
+  'Mechanical':       'Mech',
+};
+
 // ─── Aggregation ──────────────────────────────────────────────────────────────
 function avgCardField(cardMap, months, field) {
   const vals = months.map(m=>{ const v=cardMap[m]?.[field]; if(!v)return null; const n=parseFloat(String(v).replace(/[^\d.]/g,'')); return isNaN(n)?null:n; }).filter(x=>x!==null);
@@ -855,28 +865,96 @@ export default function AnalyticsPage({ role: propRole }) {
   }
 
   function AdminView() {
+    // Extra derived data for new charts
+    const deptTrendData = MONTHS_ALL.map(mn => {
+      const row = { month: mn };
+      ['CS','Phys','Math','ECE','Mech'].forEach(d => {
+        const found = (adminAttByMonth[mn]??[]).find(x=>x.dept===d);
+        row[d] = found?.avg ?? 0;
+      });
+      return row;
+    });
+
+    const deptPassTrendData = MONTHS_ALL.map(mn => {
+      const row = { month: mn };
+      ['CS','Phys','Math','ECE','Mech'].forEach(d => {
+        const found = (adminExamByMonth[mn]??[]).find(x=>x.dept===d);
+        row[d] = found?.pass ?? 0;
+      });
+      return row;
+    });
+
+    const rankingData = (() => {
+      const depts = ['CS','Phys','Math','ECE','Mech'];
+      return depts.map(d => {
+        const att  = Math.round(activeMonths.reduce((s,m)=>{ const f=(adminAttByMonth[m]??[]).find(x=>x.dept===d); return s+(f?.avg??0); },0)/activeMonths.length);
+        const pass = Math.round(activeMonths.reduce((s,m)=>{ const f=(adminExamByMonth[m]??[]).find(x=>x.dept===d); return s+(f?.pass??0); },0)/activeMonths.length);
+        const score = Math.round((att*0.4)+(pass*0.6));
+        return { dept:d, att, pass, score };
+      }).sort((a,b)=>b.score-a.score);
+    })();
+
+    // Month-over-month change for summary cards
+    const prevMonth = activeMonths.length>1 ? activeMonths[activeMonths.length-2] : activeMonths[0];
+    const currMonth = activeMonths[activeMonths.length-1];
+    const attChange = Math.round(
+      (adminAttByMonth[currMonth]??[]).reduce((s,d)=>s+d.avg,0)/5 -
+      (adminAttByMonth[prevMonth]??[]).reduce((s,d)=>s+d.avg,0)/5
+    );
+    const passChange = Math.round(
+      (adminExamByMonth[currMonth]??[]).reduce((s,d)=>s+d.pass,0)/5 -
+      (adminExamByMonth[prevMonth]??[]).reduce((s,d)=>s+d.pass,0)/5
+    );
+
+    const DEPT_COLORS = { CS:C.blue, Phys:C.orange, Math:C.green, ECE:C.purple, Mech:C.cyan };
+
     return (
       <>
+        {/* ── Stat cards ── */}
         <div className="stats-grid" style={{ marginBottom:24 }}>
-          {[{label:'Total Students',value:aCards.students,sub:rangeLabel,tone:'blue',icon:'🎓',trend:'up'},{label:'Total Faculty',value:aCards.faculty,sub:rangeLabel,tone:'green',icon:'👨‍🏫',trend:null},{label:'Departments',value:aCards.depts,sub:`${aCards.courses} courses`,tone:'purple',icon:'🏫',trend:null},{label:'Active Courses',value:aCards.courses,sub:semester,tone:'orange',icon:'📚',trend:'up'}].map(c=><SCard key={c.label} {...c} />)}
+          {[
+            {label:'Total Students', value:aCards.students, sub:rangeLabel,       tone:'blue',   icon:'🎓', trend:'up'},
+            {label:'Total Faculty',  value:aCards.faculty,  sub:rangeLabel,       tone:'green',  icon:'👨‍🏫',trend:null},
+            {label:'Avg Attendance', value:`${Math.round(activeMonths.reduce((s,m)=>{const r=(adminAttByMonth[m]??[]);return s+r.reduce((a,d)=>a+d.avg,0)/(r.length||1);},0)/activeMonths.length)}%`,
+              sub: attChange>=0?`▲ ${attChange}% vs prev`:`▼ ${Math.abs(attChange)}% vs prev`,
+              tone: attChange>=0?'purple':'orange', icon:'📅', trend: attChange>=0?'up':'down'},
+            {label:'Avg Pass Rate', value:`${Math.round(activeMonths.reduce((s,m)=>{const r=(adminExamByMonth[m]??[]);return s+r.reduce((a,d)=>a+d.pass,0)/(r.length||1);},0)/activeMonths.length)}%`,
+              sub: passChange>=0?`▲ ${passChange}% vs prev`:`▼ ${Math.abs(passChange)}% vs prev`,
+              tone: passChange>=0?'green':'orange', icon:'✅', trend: passChange>=0?'up':'down'},
+          ].map(c=><SCard key={c.label} {...c} />)}
         </div>
-        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:24 }}>
+
+        {/* ── Alert banner ── */}
+        {rankingData.some(d=>d.att<80) && (
+          <div style={{ display:'flex', gap:10, alignItems:'center', padding:'12px 18px', borderRadius:12, background:'#fff7ed', border:'1.5px solid #fed7aa', marginBottom:20 }}>
+            <span style={{ fontSize:20 }}>⚠️</span>
+            <div>
+              <div style={{ fontWeight:700, fontSize:13, color:'#92400e' }}>Attendance Alert</div>
+              <div style={{ fontSize:12, color:'#b45309' }}>
+                {rankingData.filter(d=>d.att<80).map(d=>`${d.dept} (${d.att}%)`).join(', ')} below 80% threshold
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* ── Row 1: Att bar + Exam bar ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:20, marginBottom:20 }}>
           <CC title="📅 Dept-wise Attendance" subtitle={`Avg % — ${rangeLabel}`}>
             <ResponsiveContainer width="100%" height={H}>
-              <BarChart data={department===DEPT_OPTS[0]?aAttData:aAttData.filter(d=>d.dept===department.split(' ')[0])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
+              <BarChart data={!DEPT_CODE[department]?aAttData:aAttData.filter(d=>d.dept===DEPT_CODE[department])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="dept" tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
                 <YAxis domain={[60,100]} tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`} />
                 <Tooltip {...TT} formatter={v=>`${v}%`} />
                 <Bar dataKey="avg" name="Avg Attendance" radius={[6,6,0,0]}>
-                  {aAttData.map((d,i)=><Cell key={i} fill={d.avg<80?C.red:d.avg<85?C.orange:C.blue}/>)}
+                  {(!DEPT_CODE[department]?aAttData:aAttData.filter(d=>d.dept===DEPT_CODE[department])).map((d,i)=><Cell key={i} fill={d.avg<80?C.red:d.avg<85?C.orange:C.blue}/>)}
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
           </CC>
-          <CC title="📝 Exam Performance" subtitle={`Pass vs Fail % — ${rangeLabel}`}>
+          <CC title="📝 Exam Pass vs Fail" subtitle={`% breakdown — ${rangeLabel}`}>
             <ResponsiveContainer width="100%" height={H}>
-              <BarChart data={department===DEPT_OPTS[0]?aExamData:aExamData.filter(d=>d.dept===department.split(' ')[0])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
+              <BarChart data={!DEPT_CODE[department]?aExamData:aExamData.filter(d=>d.dept===DEPT_CODE[department])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
                 <XAxis dataKey="dept" tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
                 <YAxis domain={[0,100]} tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`} />
@@ -887,22 +965,181 @@ export default function AnalyticsPage({ role: propRole }) {
               </BarChart>
             </ResponsiveContainer>
           </CC>
-          <CC title="📈 12-Month Attendance Trend" subtitle="College-wide avg — range highlighted" span2>
-            <ResponsiveContainer width="100%" height={H}>
-              <LineChart data={MONTHS_ALL.map(mn=>({month:mn,avg:Math.round((adminAttByMonth[mn]??[]).reduce((s,d)=>s+d.avg,0)/((adminAttByMonth[mn]??[]).length||1))}))} margin={{ top:4,right:4,left:-20,bottom:0 }}>
+        </div>
+
+        {/* ── Row 2: 12-month att trend (all depts) + Rankings table ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'3fr 2fr', gap:20, marginBottom:20 }}>
+          <CC title="📈 Attendance Trend by Department" subtitle="All 12 months — per dept line">
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={deptTrendData} margin={{ top:4,right:4,left:-20,bottom:0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
-                <XAxis dataKey="month" tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
-                <YAxis domain={[70,100]} tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`} />
+                <XAxis dataKey="month" tick={{ fontSize:10,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[65,100]} tick={{ fontSize:10,fill:'#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`} />
                 <Tooltip {...TT} formatter={v=>`${v}%`} />
-                <Line type="monotone" dataKey="avg" name="Avg Attendance" stroke={C.blue} strokeWidth={2.5} dot={(props)=>{
-                  const inRange=activeMonths.includes(props.payload?.month);
-                  return <circle key={props.index} cx={props.cx} cy={props.cy} r={inRange?6:3} fill={inRange?C.orange:C.blue} stroke="#fff" strokeWidth={2}/>;
-                }}/>
+                <Legend wrapperStyle={{ fontSize:11 }} />
+                {Object.entries(DEPT_COLORS).map(([d,col])=>(
+                  <Line key={d} type="monotone" dataKey={d} stroke={col} strokeWidth={1.8} dot={false}
+                    strokeDasharray={activeMonths.includes('Jan')?undefined:'4 2'}/>
+                ))}
               </LineChart>
             </ResponsiveContainer>
-            <div style={{ fontSize:11, color:'#9ca3af', marginTop:6, textAlign:'right' }}>🟠 = Selected range ({rangeLabel})</div>
+          </CC>
+
+          <CC title="🏆 Department Rankings" subtitle={`Composite score (att 40% + pass 60%) — ${rangeLabel}`}>
+            <table style={{ width:'100%', borderCollapse:'collapse' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...tH, paddingLeft:6 }}>#</th>
+                  <th style={tH}>Dept</th>
+                  <th style={tH}>Att%</th>
+                  <th style={tH}>Pass%</th>
+                  <th style={tH}>Score</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rankingData.map((d,i)=>(
+                  <tr key={d.dept} style={{ background: i===0?'#fffbeb':i===1?'#f0fdf4':'#fff' }}>
+                    <td style={{ ...tD, paddingLeft:8, fontSize:16 }}>{['🥇','🥈','🥉','4','5'][i]}</td>
+                    <td style={{ ...tD, fontWeight:700 }}>
+                      <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background:DEPT_COLORS[d.dept], marginRight:6 }}/>
+                      {d.dept}
+                    </td>
+                    <td style={tD}>
+                      <span style={{ fontWeight:700, color: d.att<80?C.red:d.att<85?C.orange:C.green }}>{d.att}%</span>
+                    </td>
+                    <td style={tD}>
+                      <span style={{ fontWeight:700, color: d.pass<80?C.red:d.pass<88?C.orange:C.green }}>{d.pass}%</span>
+                    </td>
+                    <td style={tD}>
+                      <div style={{ display:'flex', alignItems:'center', gap:6 }}>
+                        <div style={{ flex:1, height:6, borderRadius:3, background:'#f3f4f6', overflow:'hidden' }}>
+                          <div style={{ height:'100%', width:`${d.score}%`, background: i===0?C.orange:i===1?C.green:C.blue, borderRadius:3 }}/>
+                        </div>
+                        <span style={{ fontSize:11, fontWeight:700, color:'#374151', minWidth:28 }}>{d.score}</span>
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </CC>
         </div>
+
+        {/* ── Row 3: Pass rate trend (all depts) + Monthly summary table ── */}
+        <div style={{ display:'grid', gridTemplateColumns:'3fr 2fr', gap:20, marginBottom:20 }}>
+          <CC title="📊 Pass Rate Trend by Department" subtitle="All 12 months — per dept line">
+            <ResponsiveContainer width="100%" height={220}>
+              <LineChart data={deptPassTrendData} margin={{ top:4,right:4,left:-20,bottom:0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
+                <XAxis dataKey="month" tick={{ fontSize:10,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
+                <YAxis domain={[60,100]} tick={{ fontSize:10,fill:'#9ca3af' }} axisLine={false} tickLine={false} tickFormatter={v=>`${v}%`} />
+                <Tooltip {...TT} formatter={v=>`${v}%`} />
+                <Legend wrapperStyle={{ fontSize:11 }} />
+                {Object.entries(DEPT_COLORS).map(([d,col])=>(
+                  <Line key={d} type="monotone" dataKey={d} stroke={col} strokeWidth={1.8} dot={false}/>
+                ))}
+              </LineChart>
+            </ResponsiveContainer>
+          </CC>
+
+          <CC title="📋 Monthly Summary" subtitle={`Key metrics per month in ${rangeLabel}`}>
+            <div style={{ overflowY:'auto', maxHeight:240 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse' }}>
+                <thead style={{ position:'sticky', top:0, background:'#fff', zIndex:1 }}>
+                  <tr>
+                    <th style={tH}>Month</th>
+                    <th style={tH}>Avg Att</th>
+                    <th style={tH}>Avg Pass</th>
+                    <th style={tH}>Status</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {activeMonths.map(mn => {
+                    const att  = Math.round((adminAttByMonth[mn]??[]).reduce((s,d)=>s+d.avg,0)/5);
+                    const pass = Math.round((adminExamByMonth[mn]??[]).reduce((s,d)=>s+d.pass,0)/5);
+                    const ok   = att>=82 && pass>=85;
+                    const warn = !ok && (att>=78 || pass>=80);
+                    return (
+                      <tr key={mn}>
+                        <td style={{ ...tD, fontWeight:700 }}>{mn}</td>
+                        <td style={{ ...tD, color: att<80?C.red:att<85?C.orange:C.green, fontWeight:700 }}>{att}%</td>
+                        <td style={{ ...tD, color: pass<80?C.red:pass<88?C.orange:C.green, fontWeight:700 }}>{pass}%</td>
+                        <td style={tD}>
+                          <span style={{ fontSize:10, fontWeight:700, padding:'2px 8px', borderRadius:999,
+                            background: ok?'#f0fdf4':warn?'#fff7ed':'#fef2f2',
+                            color: ok?'#16a34a':warn?'#c2410c':'#b91c1c' }}>
+                            {ok?'✅ Good':warn?'⚠️ Watch':'🔴 Low'}
+                          </span>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          </CC>
+        </div>
+
+        {/* ── Row 4: Attendance heatmap grid ── */}
+        <CC title="🗓️ Attendance Heatmap" subtitle="All depts × all months — color intensity = avg attendance %" style={{ marginBottom:20 }}>
+          <div style={{ overflowX:'auto' }}>
+            <table style={{ borderCollapse:'separate', borderSpacing:4, width:'100%' }}>
+              <thead>
+                <tr>
+                  <th style={{ ...tH, width:50 }}>Dept</th>
+                  {MONTHS_ALL.map(m=><th key={m} style={{ ...tH, textAlign:'center', minWidth:46 }}>{m}</th>)}
+                  <th style={{ ...tH, textAlign:'center' }}>Avg</th>
+                </tr>
+              </thead>
+              <tbody>
+                {['CS','Phys','Math','ECE','Mech'].map(d => {
+                  const vals = MONTHS_ALL.map(m=>(adminAttByMonth[m]??[]).find(x=>x.dept===d)?.avg??0);
+                  const rowAvg = Math.round(vals.reduce((a,b)=>a+b,0)/12);
+                  return (
+                    <tr key={d}>
+                      <td style={{ fontSize:12, fontWeight:700, color:'#374151', padding:'2px 8px' }}>
+                        <span style={{ display:'inline-block', width:8, height:8, borderRadius:2, background:DEPT_COLORS[d], marginRight:5 }}/>
+                        {d}
+                      </td>
+                      {vals.map((v,mi) => {
+                        const intensity = Math.max(0, Math.min(1, (v-70)/25));
+                        const inSel = activeMonths.includes(MONTHS_ALL[mi]);
+                        const bg = v < 78
+                          ? `rgba(239,68,68,${0.15+intensity*0.55})`
+                          : v < 84
+                          ? `rgba(249,115,22,${0.15+intensity*0.55})`
+                          : `rgba(37,99,235,${0.12+intensity*0.55})`;
+                        return (
+                          <td key={mi} title={`${d} ${MONTHS_ALL[mi]}: ${v}%`} style={{
+                            background: bg,
+                            borderRadius:6,
+                            border: inSel?'2px solid #f97316':'2px solid transparent',
+                            textAlign:'center', fontSize:11, fontWeight:700,
+                            color: v<78?'#b91c1c':v<84?'#c2410c':'#1e40af',
+                            padding:'5px 2px', minWidth:46, cursor:'default',
+                          }}>{v}%</td>
+                        );
+                      })}
+                      <td style={{ textAlign:'center', fontSize:12, fontWeight:800,
+                        color: rowAvg<80?C.red:rowAvg<85?C.orange:C.blue,
+                        padding:'5px 6px' }}>{rowAvg}%</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:'flex', gap:16, marginTop:10, fontSize:11, color:'#6b7280', alignItems:'center' }}>
+            <span style={{ fontWeight:600 }}>Legend:</span>
+            {[['rgba(239,68,68,0.5)','<78% Low'],['rgba(249,115,22,0.5)','78–84% Watch'],['rgba(37,99,235,0.5)','85%+ Good']].map(([bg,lbl])=>(
+              <span key={lbl} style={{ display:'flex', alignItems:'center', gap:5 }}>
+                <span style={{ display:'inline-block', width:14, height:14, borderRadius:3, background:bg }}/>{lbl}
+              </span>
+            ))}
+            <span style={{ marginLeft:8, color:'#f97316', fontWeight:600 }}>🟠 bordered = selected range</span>
+          </div>
+        </CC>
+
         <InsightSection role="admin" />
       </>
     );
@@ -942,7 +1179,7 @@ export default function AnalyticsPage({ role: propRole }) {
         </div>
         <CC title="🏫 Department-wise Fee Collection" subtitle={`${rangeLabel} avg`} style={{ marginBottom:24 }}>
           <ResponsiveContainer width="100%" height={H}>
-            <BarChart data={department===DEPT_OPTS[0]?fiDeptData:fiDeptData.filter(d=>d.dept===department.split(' ')[0])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
+            <BarChart data={!DEPT_CODE[department]?fiDeptData:fiDeptData.filter(d=>d.dept===DEPT_CODE[department])} margin={{ top:4,right:4,left:-20,bottom:0 }}>
               <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6" />
               <XAxis dataKey="dept" tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
               <YAxis tick={{ fontSize:11,fill:'#9ca3af' }} axisLine={false} tickLine={false} />
@@ -994,10 +1231,13 @@ export default function AnalyticsPage({ role: propRole }) {
             </div>
           </div>
           <nav className="sidebar-nav">
-            {menuGroups.map((group,gi)=>(
+            {menuGroups.map((group)=>(
               <div key={group.title}>
                 <div className="nav-section-label">{group.title}</div>
-                <ul>{group.items.map((item,ii)=><li key={item}><a href="#" className={gi===0&&ii===0?'active':''} onClick={e=>e.preventDefault()}>{item}</a></li>)}</ul>
+                <ul>{group.items.map((item)=>{
+                  const isActive = item === 'Analytics';
+                  return <li key={item}><a href="#" className={isActive?'active':''} onClick={e=>e.preventDefault()}>{item}</a></li>;
+                })}</ul>
               </div>
             ))}
           </nav>
@@ -1023,8 +1263,10 @@ export default function AnalyticsPage({ role: propRole }) {
                 </p>
               </div>
             </div>
-            <div className="topbar-right">
-              <span className="badge badge-info">{data.label}</span>
+            <div className="topbar-right" style={{ display:'flex', alignItems:'center', gap:10 }}>
+              <span style={{ fontSize:11, color:'#9ca3af', fontWeight:500 }}>
+                Updated {new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'})}
+              </span>
             </div>
           </div>
 
