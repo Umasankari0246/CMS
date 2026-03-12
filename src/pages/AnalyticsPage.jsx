@@ -266,6 +266,18 @@ function avgMarksDist(months){
 function fmt(n){return(n/100000).toFixed(1)+'L';}
 function fmtCr(n){return n>=10000000?`₹${(n/10000000).toFixed(1)}Cr`:`₹${(n/100000).toFixed(1)}L`;}
 
+// ── Universal inside-slice pie label ─────────────────────────────────────────
+const RADIAN=Math.PI/180;
+function PieLabelInside({cx,cy,midAngle,innerRadius,outerRadius,value,percent,name,labelType='pct',threshold=6}){
+  const pct=Math.round((percent??0)*100);
+  if(pct<threshold)return null;
+  const r=innerRadius+(outerRadius-innerRadius)*0.55;
+  const x=cx+r*Math.cos(-midAngle*RADIAN);
+  const y=cy+r*Math.sin(-midAngle*RADIAN);
+  const txt=labelType==='count'?`${value}`:labelType==='name'?`${String(name).split(' ')[0]}`:`${pct}%`;
+  return<text x={x} y={y} fill="#fff" textAnchor="middle" dominantBaseline="central" fontSize={11} fontWeight={700} style={{pointerEvents:'none'}}>{txt}</text>;
+}
+
 // ── CSV Export ────────────────────────────────────────────────────────────────
 function exportCSV(role,months,rangeLabel,tab){
   let headers=[],rows=[];
@@ -291,38 +303,97 @@ function exportCSV(role,months,rangeLabel,tab){
 // CALENDAR RANGE PICKER
 // ══════════════════════════════════════════════════════════════════════════════
 function CalendarRangePicker({startMY,endMY,onChange,onClose}){
-  const [viewYear,setViewYear]=useState(startMY?.year??2026);
-  const [phase,setPhase]=useState('start');
-  const [hoverIdx,setHoverIdx]=useState(null);
-  const [tempStart,setTempStart]=useState(startMY);
-  const startKey=startMY?myToKey(startMY):null;
-  const endKey=endMY?myToKey(endMY):null;
+  // Always reset to 'start' phase when picker opens (component mounts fresh each time)
+  const [viewYear,  setViewYear]  = useState(startMY?.year??2026);
+  const [phase,     setPhase]     = useState('start');
+  const [hoverKey,  setHoverKey]  = useState(null);   // full key = year*12+month
+  const [tempStart, setTempStart] = useState(null);   // null until user clicks first month
+
+  const confirmedStartKey = startMY ? myToKey(startMY) : null;
+  const confirmedEndKey   = endMY   ? myToKey(endMY)   : null;
+
   function clickMonth(mi){
-    const my={month:mi,year:viewYear},k=myToKey(my);
-    if(phase==='start'){setTempStart(my);onChange({startMY:my,endMY:my});setPhase('end');}
-    else{const sk=myToKey(tempStart);if(k<sk){onChange({startMY:my,endMY:tempStart});}else{onChange({startMY:tempStart,endMY:my});}setPhase('start');onClose();}
+    const clicked = {month:mi, year:viewYear};
+    const ck = myToKey(clicked);
+    if(phase==='start'){
+      // First click — set start, preview same as start for now
+      setTempStart(clicked);
+      onChange({startMY:clicked, endMY:clicked});
+      setPhase('end');
+    } else {
+      // Second click — finalise range
+      const sk = myToKey(tempStart);
+      if(ck < sk){ onChange({startMY:clicked, endMY:tempStart}); }
+      else        { onChange({startMY:tempStart, endMY:clicked}); }
+      setTempStart(null);
+      setPhase('start');
+      onClose();
+    }
   }
+
   function cellStyle(mi){
-    const k=myToKey({month:mi,year:viewYear}),sk=tempStart?myToKey(tempStart):startKey,ek=phase==='end'&&hoverIdx!==null?myToKey({month:hoverIdx,year:viewYear}):endKey;
-    const lo=sk!=null&&ek!=null?Math.min(sk,ek):null,hi=sk!=null&&ek!=null?Math.max(sk,ek):null;
-    const inRange=lo!=null&&k>=lo&&k<=hi,isEdge=(sk!=null&&k===sk)||(ek!=null&&k===ek);
-    return{width:'100%',height:40,borderRadius:8,border:'none',fontSize:13,fontWeight:700,cursor:'pointer',transition:'all 0.1s',background:isEdge?'#2563eb':inRange?'#dbeafe':'transparent',color:isEdge?'#fff':inRange?'#1e40af':'#374151',boxShadow:isEdge?'0 2px 8px rgba(37,99,235,.3)':'none'};
+    const k   = myToKey({month:mi, year:viewYear});
+    // anchor = the click already made in this session, else fall back to confirmed start
+    const sk  = tempStart ? myToKey(tempStart) : confirmedStartKey;
+    // end = hover position while picking end, else confirmed end
+    const ek  = (phase==='end' && hoverKey!=null) ? hoverKey : confirmedEndKey;
+    const lo  = (sk!=null && ek!=null) ? Math.min(sk,ek) : null;
+    const hi  = (sk!=null && ek!=null) ? Math.max(sk,ek) : null;
+    const isEdge  = (sk!=null && k===sk) || (ek!=null && k===ek);
+    const inRange = lo!=null && k>lo && k<hi;
+    return{
+      width:'100%',height:40,borderRadius:8,border:'none',fontSize:13,fontWeight:700,
+      cursor:'pointer',transition:'all 0.1s',
+      background: isEdge?'#2563eb': inRange?'#dbeafe':'transparent',
+      color:      isEdge?'#fff'   : inRange?'#1e40af':'#374151',
+      boxShadow:  isEdge?'0 2px 8px rgba(37,99,235,.3)':'none',
+    };
   }
+
+  const displayStart = tempStart ?? startMY;
+  const displayEnd   = phase==='end' && hoverKey ? keyToMY(hoverKey) : endMY;
+
   return(
-    <div style={{position:'absolute',zIndex:1100,top:'calc(100% + 10px)',left:0,background:'#fff',borderRadius:18,border:'1.5px solid #e5e7eb',boxShadow:'0 12px 40px rgba(0,0,0,.16)',padding:22,minWidth:320}}>
+    <div style={{position:'absolute',zIndex:1100,top:'calc(100% + 10px)',left:0,background:'#fff',borderRadius:18,border:'1.5px solid #e5e7eb',boxShadow:'0 12px 40px rgba(0,0,0,.16)',padding:22,minWidth:330}}>
       <div style={{display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:16}}>
         <div style={{display:'flex',alignItems:'center',gap:8}}>
           <button onClick={()=>setViewYear(y=>y-1)} style={{width:28,height:28,borderRadius:7,border:'1px solid #e5e7eb',background:'#f9fafb',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Ico.ChevL/></button>
-          <select value={viewYear} onChange={e=>setViewYear(Number(e.target.value))} style={{border:'1.5px solid #e5e7eb',borderRadius:7,padding:'2px 6px',fontWeight:700,fontSize:14,color:'#111827',cursor:'pointer',outline:'none'}}>{YEARS.map(y=><option key={y}>{y}</option>)}</select>
+          <select value={viewYear} onChange={e=>setViewYear(Number(e.target.value))} style={{border:'1.5px solid #e5e7eb',borderRadius:7,padding:'2px 6px',fontWeight:700,fontSize:14,color:'#111827',cursor:'pointer',outline:'none'}}>
+            {YEARS.map(y=><option key={y}>{y}</option>)}
+          </select>
           <button onClick={()=>setViewYear(y=>y+1)} style={{width:28,height:28,borderRadius:7,border:'1px solid #e5e7eb',background:'#f9fafb',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center'}}><Ico.ChevR/></button>
         </div>
-        <div style={{fontSize:12,fontWeight:600,color:phase==='start'?'#2563eb':'#f97316',background:phase==='start'?'#eff6ff':'#fff7ed',padding:'3px 10px',borderRadius:999,border:`1px solid ${phase==='start'?'#bfdbfe':'#fed7aa'}`}}>{phase==='start'?'① Start month':'② End month'}</div>
+        <div style={{fontSize:12,fontWeight:600,padding:'3px 10px',borderRadius:999,
+          color:      phase==='start'?'#2563eb':'#f97316',
+          background: phase==='start'?'#eff6ff':'#fff7ed',
+          border:`1px solid ${phase==='start'?'#bfdbfe':'#fed7aa'}`}}>
+          {phase==='start'?'\u2460 Start month':'\u2461 End month'}
+        </div>
         <button onClick={onClose} style={{width:28,height:28,borderRadius:7,border:'1px solid #e5e7eb',background:'#f9fafb',cursor:'pointer',display:'flex',alignItems:'center',justifyContent:'center',color:'#6b7280'}}><Ico.Close/></button>
       </div>
+
       <div style={{display:'grid',gridTemplateColumns:'repeat(4,1fr)',gap:6}}>
-        {MONTHS_ALL.map((m,mi)=><button key={m} style={cellStyle(mi)} onClick={()=>clickMonth(mi)} onMouseEnter={()=>phase==='end'&&setHoverIdx(mi)} onMouseLeave={()=>setHoverIdx(null)}>{m}</button>)}
+        {MONTHS_ALL.map((m,mi)=>(
+          <button key={m}
+            style={cellStyle(mi)}
+            onClick={()=>clickMonth(mi)}
+            onMouseEnter={()=>{ if(phase==='end') setHoverKey(myToKey({month:mi,year:viewYear})); }}
+            onMouseLeave={()=>setHoverKey(null)}>
+            {m}
+          </button>
+        ))}
       </div>
-      {startMY&&endMY&&<div style={{marginTop:14,padding:'8px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0',fontSize:12,fontWeight:700,color:'#15803d',textAlign:'center'}}>{myLabel(startMY)===myLabel(endMY)?`📅 ${myLabel(startMY)}`:`📅 ${myLabel(startMY)} → ${myLabel(endMY)}`}</div>}
+
+      <div style={{marginTop:14,padding:'8px 14px',background:'#f0fdf4',borderRadius:10,border:'1px solid #bbf7d0',fontSize:12,fontWeight:700,color:'#15803d',textAlign:'center'}}>
+        {phase==='end' && displayStart
+          ? `\uD83D\uDCC5 ${myLabel(displayStart)} \u2192 ${displayEnd ? myLabel(displayEnd) : '...'}`
+          : (displayStart && displayEnd)
+            ? (myLabel(displayStart)===myLabel(displayEnd)
+                ? `\uD83D\uDCC5 ${myLabel(displayStart)}`
+                : `\uD83D\uDCC5 ${myLabel(displayStart)} \u2192 ${myLabel(displayEnd)}`)
+            : '\uD83D\uDCC5 Pick start month'
+        }
+      </div>
     </div>
   );
 }
@@ -457,9 +528,9 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
   const filteredAtt  = dc?aAttData.filter(d=>d.dept===dc):aAttData;
   const filteredExam = dc?aExamData.filter(d=>d.dept===dc):aExamData;
 
-  const attTrendData  = MONTHS_ALL.map(mn=>{const row={month:mn};DEPTS.forEach(d=>{const f=(adminAttByMonth[mn]??[]).find(x=>x.dept===d);row[d]=f?.avg??0;});return row;});
-  const passTrendData = MONTHS_ALL.map(mn=>{const row={month:mn};DEPTS.forEach(d=>{const f=(adminExamByMonth[mn]??[]).find(x=>x.dept===d);row[d]=f?.pass??0;});return row;});
-  const incExpData    = MONTHS_ALL.map(mn=>({month:mn,...(incomeExpenseByMonth[mn]??{income:0,expense:0})}));
+  const attTrendData  = activeMonths.map(mn=>{const row={month:mn};(dc?[dc]:DEPTS).forEach(d=>{const f=(adminAttByMonth[mn]??[]).find(x=>x.dept===d);row[d]=f?.avg??0;});return row;});
+  const passTrendData = activeMonths.map(mn=>{const row={month:mn};(dc?[dc]:DEPTS).forEach(d=>{const f=(adminExamByMonth[mn]??[]).find(x=>x.dept===d);row[d]=f?.pass??0;});return row;});
+  const incExpData    = activeMonths.map(mn=>({month:mn,...(incomeExpenseByMonth[mn]??{income:0,expense:0})}));
 
   const rankingData = useMemo(()=>{
     return DEPTS.map(d=>{
@@ -598,7 +669,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="👨‍🏫 Faculty by Dept" subtitle="Current distribution" action={<button onClick={()=>setTab('faculty')} style={miniBtn}>Expand</button>}>
               <ResponsiveContainer width="100%" height={160}>
-                <PieChart><Pie data={Object.entries(facultyByDept).map(([k,v])=>({name:k,value:v}))} cx="50%" cy="50%" outerRadius={65} dataKey="value" label={({name,value})=>`${name}:${value}`} labelLine={false}>
+                <PieChart><Pie data={Object.entries(facultyByDept).map(([k,v])=>({name:k,value:v}))} cx="50%" cy="50%" outerRadius={65} dataKey="value" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                   {Object.keys(facultyByDept).map((_,i)=><Cell key={i} fill={Object.values(DEPT_COLORS)[i]}/>)}
                 </Pie><Tooltip {...TT}/></PieChart>
               </ResponsiveContainer>
@@ -619,7 +690,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:20,marginBottom:20}}>
             <CC title="👥 Students by Department" subtitle="Distribution across depts">
               <ResponsiveContainer width="100%" height={200}>
-                <PieChart><Pie data={deptPieData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({name,value})=>`${name} ${value}`} labelLine={false}>
+                <PieChart><Pie data={deptPieData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                   {deptPieData.map((_,i)=><Cell key={i} fill={Object.values(DEPT_COLORS)[i%5]}/>)}
                 </Pie><Tooltip {...TT}/></PieChart>
               </ResponsiveContainer>
@@ -633,7 +704,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="⚧ Gender Distribution" subtitle="Student gender breakdown">
               <ResponsiveContainer width="100%" height={200}>
-                <PieChart><Pie data={genderData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({name,value})=>`${name} ${value}%`} labelLine={false}>
+                <PieChart><Pie data={genderData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {genderData.map((_,i)=><Cell key={i} fill={[C.blue,C.orange,C.teal][i]}/>)}
                 </Pie><Tooltip {...TT}/></PieChart>
               </ResponsiveContainer>
@@ -744,14 +815,14 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr 1fr',gap:20,marginBottom:20}}>
             <CC title="👨‍🏫 Faculty by Department" subtitle="Distribution">
               <ResponsiveContainer width="100%" height={200}>
-                <PieChart><Pie data={facultyPieData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={({name,value})=>`${name.slice(0,4)} ${value}`} labelLine={false}>
+                <PieChart><Pie data={facultyPieData} cx="50%" cy="50%" outerRadius={75} dataKey="value" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                   {facultyPieData.map((_,i)=><Cell key={i} fill={Object.values(DEPT_COLORS)[i%5]}/>)}
                 </Pie><Tooltip {...TT}/></PieChart>
               </ResponsiveContainer>
             </CC>
             <CC title="🎖️ Faculty Rank Distribution" subtitle="By academic rank">
               <ResponsiveContainer width="100%" height={200}>
-                <PieChart><Pie data={facultyRankData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="count">
+                <PieChart><Pie data={facultyRankData} cx="50%" cy="50%" innerRadius={40} outerRadius={70} dataKey="count" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                   {facultyRankData.map((_,i)=><Cell key={i} fill={[C.blue,C.purple,C.cyan,C.teal][i]}/>)}
                 </Pie><Tooltip {...TT}/><Legend wrapperStyle={{fontSize:10}}/></PieChart>
               </ResponsiveContainer>
@@ -853,7 +924,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
           </div>
 
           <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:20,marginBottom:20}}>
-            <CC title="💰 Income vs Expenses" subtitle="Monthly comparison (12 months)">
+            <CC title="💰 Income vs Expenses" subtitle={`Monthly comparison — ${rangeLabel}`}>
               <ResponsiveContainer width="100%" height={H2}>
                 <BarChart data={incExpData} margin={{top:4,right:4,left:-10,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/><XAxis dataKey="month" tick={{fontSize:9,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><YAxis tick={{fontSize:9,fill:'#9ca3af'}} axisLine={false} tickLine={false} tickFormatter={fmtCr}/><Tooltip {...TT} formatter={fmtCr}/><Legend wrapperStyle={{fontSize:11}}/>
@@ -864,7 +935,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="💸 Expense Breakdown" subtitle="Category-wise split">
               <ResponsiveContainer width="100%" height={H2}>
-                <PieChart><Pie data={expenseBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" label={({name,value})=>`${value}%`}>
+                <PieChart><Pie data={expenseBreakdown} cx="50%" cy="50%" innerRadius={50} outerRadius={80} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {expenseBreakdown.map((_,i)=><Cell key={i} fill={[C.blue,C.orange,C.green,C.purple,C.teal][i]}/>)}
                 </Pie><Tooltip {...TT} formatter={v=>`${v}%`}/><Legend wrapperStyle={{fontSize:10}}/></PieChart>
               </ResponsiveContainer>
@@ -882,7 +953,7 @@ function AdminView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="📊 Fee Payment Status" subtitle={`${rangeLabel} avg split`}>
               <ResponsiveContainer width="100%" height={H}>
-                <PieChart><Pie data={avgFinancePie(activeMonths)} cx="50%" cy="50%" innerRadius={50} outerRadius={78} paddingAngle={4} dataKey="value">
+                <PieChart><Pie data={avgFinancePie(activeMonths)} cx="50%" cy="50%" innerRadius={50} outerRadius={78} paddingAngle={4} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {avgFinancePie(activeMonths).map((_,i)=><Cell key={i} fill={PIE_COLS[i]}/>)}
                 </Pie><Tooltip {...TT} formatter={v=>`${v}%`}/><Legend wrapperStyle={{fontSize:12}}/></PieChart>
               </ResponsiveContainer>
@@ -923,7 +994,7 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
   const fiColData  = useMemo(()=>activeMonths.flatMap(m=>(financeColByMonth[m]??[]).map(d=>({...d,week:`${m} ${d.week}`}))),[activeMonths]);
   const fiPieData  = useMemo(()=>avgFinancePie(activeMonths),[activeMonths]);
   const fiDeptData = useMemo(()=>dc?avgFinanceDept(activeMonths).filter(d=>d.dept===dc):avgFinanceDept(activeMonths),[activeMonths,dc]);
-  const monthlyTrendData = MONTHS_ALL.map(mn=>({month:mn,collected:(financeColByMonth[mn]??[]).reduce((s,d)=>s+d.collected,0),target:(financeColByMonth[mn]??[]).reduce((s,d)=>s+d.target,0)}));
+  const monthlyTrendData = activeMonths.map(mn=>({month:mn,collected:(financeColByMonth[mn]??[]).reduce((s,d)=>s+d.collected,0),target:(financeColByMonth[mn]??[]).reduce((s,d)=>s+d.target,0)}));
   const filteredPending  = pendingFilter==='all'?pendingStudents:pendingFilter==='overdue'?pendingStudents.filter(s=>s.days<0):pendingStudents.filter(s=>s.days>=0);
   const deptFilteredPending = dc?filteredPending.filter(s=>s.dept===dc):filteredPending;
 
@@ -956,13 +1027,13 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
                   <defs><linearGradient id="gFin" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.blue} stopOpacity={0.2}/><stop offset="95%" stopColor={C.blue} stopOpacity={0}/></linearGradient></defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/><XAxis dataKey="month" tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><YAxis tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false} tickFormatter={v=>`₹${fmt(v)}`}/><Tooltip {...TT} formatter={v=>`₹${fmt(v)}`}/><Legend wrapperStyle={{fontSize:11}}/>
                   <Area type="monotone" dataKey="target"    name="Target"    stroke="#e5e7eb" fill="none" strokeWidth={1.5} strokeDasharray="4 2"/>
-                  <Area type="monotone" dataKey="collected" name="Collected" stroke={C.blue}  fill="url(#gFin)" strokeWidth={2.5} dot={(props)=>{const inR=activeMonths.includes(props.payload?.month);return<circle key={props.index} cx={props.cx} cy={props.cy} r={inR?6:3} fill={inR?C.orange:C.blue} stroke="#fff" strokeWidth={2}/>;}}/>
+                  <Area type="monotone" dataKey="collected" name="Collected" stroke={C.blue}  fill="url(#gFin)" strokeWidth={2.5} dot={(props)=>{const inR=activeMonths.includes(props.payload?.month);return<circle key={props.cx} cx={props.cx} cy={props.cy} r={inR?6:3} fill={inR?C.orange:C.blue} stroke="#fff" strokeWidth={2}/>;}}/>
                 </AreaChart>
               </ResponsiveContainer>
             </CC>
             <CC title="📊 Payment Status" subtitle={`${rangeLabel} avg`}>
               <ResponsiveContainer width="100%" height={H2}>
-                <PieChart><Pie data={fiPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value">
+                <PieChart><Pie data={fiPieData} cx="50%" cy="50%" innerRadius={55} outerRadius={85} paddingAngle={4} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {fiPieData.map((_,i)=><Cell key={i} fill={PIE_COLS[i]}/>)}
                 </Pie><Tooltip {...TT} formatter={v=>`${v}%`}/><Legend wrapperStyle={{fontSize:12}}/></PieChart>
               </ResponsiveContainer>
@@ -980,7 +1051,7 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="💳 Payment Method Split" subtitle="Online / bank / cash">
               <ResponsiveContainer width="100%" height={H}>
-                <PieChart><Pie data={paymentMethodData} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={({name,value})=>`${name} ${value}%`} labelLine={false}>
+                <PieChart><Pie data={paymentMethodData} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {paymentMethodData.map((_,i)=><Cell key={i} fill={[C.blue,C.green,C.orange][i]}/>)}
                 </Pie><Tooltip {...TT} formatter={v=>`${v}%`}/></PieChart>
               </ResponsiveContainer>
@@ -1060,9 +1131,9 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="📈 Overdue Trend" subtitle="Monthly overdue amount trend">
               <ResponsiveContainer width="100%" height={H}>
-                <LineChart data={MONTHS_ALL.map(mn=>({month:mn,overdue:(financeDeptByMonth[mn]??[]).reduce((s,d)=>s+d.overdue,0)}))} margin={{top:4,right:4,left:-20,bottom:0}}>
+                <LineChart data={activeMonths.map(mn=>({month:mn,overdue:(financeDeptByMonth[mn]??[]).reduce((s,d)=>s+d.overdue,0)}))} margin={{top:4,right:4,left:-20,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/><XAxis dataKey="month" tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><YAxis tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><Tooltip {...TT}/>
-                  <Line type="monotone" dataKey="overdue" name="Overdue Count" stroke={C.red} strokeWidth={2.5} dot={(p)=>{const inR=activeMonths.includes(p.payload?.month);return<circle key={p.index} cx={p.cx} cy={p.cy} r={inR?6:3} fill={inR?C.orange:C.red} stroke="#fff" strokeWidth={2}/>;}}/>
+                  <Line type="monotone" dataKey="overdue" name="Overdue Count" stroke={C.red} strokeWidth={2.5} dot={(p)=>{const inR=activeMonths.includes(p.payload?.month);return<circle key={p.cx} cx={p.cx} cy={p.cy} r={inR?6:3} fill={inR?C.orange:C.red} stroke="#fff" strokeWidth={2}/>;}}/>
                 </LineChart>
               </ResponsiveContainer>
             </CC>
@@ -1089,14 +1160,14 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
           <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:20,marginBottom:20}}>
             <CC title="💸 Expense Breakdown" subtitle="Category distribution">
               <ResponsiveContainer width="100%" height={H2}>
-                <PieChart><Pie data={expenseBreakdown} cx="50%" cy="50%" outerRadius={85} dataKey="value" label={({name,value})=>`${name} ${value}%`} labelLine={true}>
+                <PieChart><Pie data={expenseBreakdown} cx="50%" cy="50%" outerRadius={85} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {expenseBreakdown.map((_,i)=><Cell key={i} fill={[C.blue,C.orange,C.red,C.purple,C.teal][i]}/>)}
                 </Pie><Tooltip {...TT} formatter={v=>`${v}%`}/></PieChart>
               </ResponsiveContainer>
             </CC>
             <CC title="📊 Income vs Expense Trend" subtitle="Monthly surplus / deficit">
               <ResponsiveContainer width="100%" height={H2}>
-                <AreaChart data={MONTHS_ALL.map(mn=>({month:mn,...(incomeExpenseByMonth[mn]??{income:0,expense:0}),net:(incomeExpenseByMonth[mn]?.income??0)-(incomeExpenseByMonth[mn]?.expense??0)}))} margin={{top:4,right:4,left:-10,bottom:0}}>
+                <AreaChart data={activeMonths.map(mn=>({month:mn,...(incomeExpenseByMonth[mn]??{income:0,expense:0}),net:(incomeExpenseByMonth[mn]?.income??0)-(incomeExpenseByMonth[mn]?.expense??0)}))} margin={{top:4,right:4,left:-10,bottom:0}}>
                   <defs><linearGradient id="gNet" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor={C.green} stopOpacity={0.3}/><stop offset="95%" stopColor={C.green} stopOpacity={0}/></linearGradient></defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/><XAxis dataKey="month" tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><YAxis tick={{fontSize:9,fill:'#9ca3af'}} axisLine={false} tickLine={false} tickFormatter={fmtCr}/><Tooltip {...TT} formatter={fmtCr}/><Legend wrapperStyle={{fontSize:11}}/>
                   <Area type="monotone" dataKey="net" name="Net Surplus" stroke={C.green} fill="url(#gNet)" strokeWidth={2.5}/>
@@ -1140,7 +1211,7 @@ function FinanceView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="🎓 Scholarship Type Split" subtitle="Total across all depts">
               <ResponsiveContainer width="100%" height={H2}>
-                <PieChart><Pie data={[{name:'Merit',value:scholarshipByDept.reduce((s,d)=>s+d.merit,0)},{name:'Need-based',value:scholarshipByDept.reduce((s,d)=>s+d.needBased,0)},{name:'Sports',value:scholarshipByDept.reduce((s,d)=>s+d.sports,0)}]} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={({name,value})=>`${name} (${value})`}>
+                <PieChart><Pie data={[{name:'Merit',value:scholarshipByDept.reduce((s,d)=>s+d.merit,0)},{name:'Need-based',value:scholarshipByDept.reduce((s,d)=>s+d.needBased,0)},{name:'Sports',value:scholarshipByDept.reduce((s,d)=>s+d.sports,0)}]} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                   {[0,1,2].map(i=><Cell key={i} fill={[C.blue,C.green,C.orange][i]}/>)}
                 </Pie><Tooltip {...TT}/><Legend wrapperStyle={{fontSize:12}}/></PieChart>
               </ResponsiveContainer>
@@ -1256,7 +1327,7 @@ function FacultyView({activeMonths,rangeLabel,department,semester}){
               </CC>
               <CC title="📈 Grade Distribution Pie" subtitle="Visual breakdown of grades">
                 <ResponsiveContainer width="100%" height={H}>
-                  <PieChart><Pie data={fMarksDist} cx="50%" cy="50%" outerRadius={80} dataKey="count" nameKey="range" label={({range,count})=>`${range.split(' ')[0]} ${count}`} labelLine={false}>
+                  <PieChart><Pie data={fMarksDist} cx="50%" cy="50%" outerRadius={80} dataKey="count" nameKey="range" label={<PieLabelInside labelType="count"/>} labelLine={false}>
                     {fMarksDist.map((_,i)=><Cell key={i} fill={[C.green,C.blue,C.cyan,C.purple,C.orange,C.red][i]}/>)}
                   </Pie><Tooltip {...TT}/></PieChart>
                 </ResponsiveContainer>
@@ -1265,9 +1336,9 @@ function FacultyView({activeMonths,rangeLabel,department,semester}){
 
             <CC title="📊 Avg Marks Trend" subtitle="Class average over months" style={{marginBottom:20}}>
               <ResponsiveContainer width="100%" height={H}>
-                <LineChart data={MONTHS_ALL.map(mn=>{const marks=marksDistByMonth[mn]??[];const total=marks.reduce((s,d)=>s+d.count,0)||1;const avg=Math.round(marks.reduce((s,d,i)=>s+[94,84,74,64,54,44][i]*d.count,0)/total);return{month:mn,avg};})} margin={{top:4,right:4,left:-20,bottom:0}}>
+                <LineChart data={activeMonths.map(mn=>{const marks=marksDistByMonth[mn]??[];const total=marks.reduce((s,d)=>s+d.count,0)||1;const avg=Math.round(marks.reduce((s,d,i)=>s+[94,84,74,64,54,44][i]*d.count,0)/total);return{month:mn,avg};})} margin={{top:4,right:4,left:-20,bottom:0}}>
                   <CartesianGrid strokeDasharray="3 3" stroke="#f3f4f6"/><XAxis dataKey="month" tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><YAxis domain={[60,100]} tick={{fontSize:10,fill:'#9ca3af'}} axisLine={false} tickLine={false}/><Tooltip {...TT}/>
-                  <Line type="monotone" dataKey="avg" name="Class Avg" stroke={C.blue} strokeWidth={2.5} dot={(p)=>{const inR=activeMonths.includes(p.payload?.month);return<circle key={p.index} cx={p.cx} cy={p.cy} r={inR?6:3} fill={inR?C.orange:C.blue} stroke="#fff" strokeWidth={2}/>;}}/>
+                  <Line type="monotone" dataKey="avg" name="Class Avg" stroke={C.blue} strokeWidth={2.5} dot={(p)=>{const inR=activeMonths.includes(p.payload?.month);return<circle key={p.cx} cx={p.cx} cy={p.cy} r={inR?6:3} fill={inR?C.orange:C.blue} stroke="#fff" strokeWidth={2}/>;}}/>
                 </LineChart>
               </ResponsiveContainer>
             </CC>
@@ -1297,7 +1368,7 @@ function FacultyView({activeMonths,rangeLabel,department,semester}){
             </CC>
             <CC title="📊 Submission Status Split" subtitle={`${rangeLabel} avg`}>
               <ResponsiveContainer width="100%" height={H}>
-                <PieChart><Pie data={[{name:'On Time',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.onTime,0)},0)/activeMonths.length)},{name:'Late',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.late,0)},0)/activeMonths.length)},{name:'Missing',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.missing,0)},0)/activeMonths.length)}]} cx="50%" cy="50%" outerRadius={80} dataKey="value">
+                <PieChart><Pie data={[{name:'On Time',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.onTime,0)},0)/activeMonths.length)},{name:'Late',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.late,0)},0)/activeMonths.length)},{name:'Missing',value:Math.round(activeMonths.reduce((s,m)=>{const d=facultySubByMonth[m]??[];return s+d.reduce((a,w)=>a+w.missing,0)},0)/activeMonths.length)}]} cx="50%" cy="50%" outerRadius={80} dataKey="value" label={<PieLabelInside labelType="pct"/>} labelLine={false}>
                   {[0,1,2].map(i=><Cell key={i} fill={[C.green,C.orange,C.red][i]}/>)}
                 </Pie><Tooltip {...TT}/><Legend wrapperStyle={{fontSize:12}}/></PieChart>
               </ResponsiveContainer>
@@ -1390,11 +1461,14 @@ export default function AnalyticsPage({role:propRole}){
     return()=>document.removeEventListener('mousedown',onOut);
   },[calOpen]);
 
+  // activeMonths: ordered list of month NAME strings for the selected range.
+  // Uses keys (year*12+month) so cross-year ranges never collapse duplicate names.
+  // Each unique key maps to exactly one month name — no deduplication needed.
   const activeMonths = useMemo(()=>{
     const sk=myToKey(startMY),ek=myToKey(endMY),lo=Math.min(sk,ek),hi=Math.max(sk,ek);
     const res=[];
-    for(let k=lo;k<=hi;k++){const {month}=keyToMY(k);res.push(MONTHS_ALL[month]);}
-    return[...new Set(res)];
+    for(let k=lo;k<=hi;k++){ const {month}=keyToMY(k); res.push(MONTHS_ALL[month]); }
+    return res;
   },[startMY,endMY]);
 
   const rangeLabel   = myToKey(startMY)===myToKey(endMY)?myLabel(startMY):`${myLabel(startMY)} \u2013 ${myLabel(endMY)}`;
